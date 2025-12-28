@@ -1,0 +1,1317 @@
+import random
+import time
+import json
+import os
+from datetime import datetime
+from enum import Enum
+
+# ============== الأنظمة الأساسية ==============
+
+class ItemType(Enum):
+    WEAPON = "سلاح"
+    ARMOR = "درع"
+    POTION = "جرعة"
+    KEY = "مفتاح"
+    TREASURE = "كنز"
+    MATERIAL = "مادة"
+
+class Item:
+    def __init__(self, name, item_type, value, description, stats=None):
+        self.name = name
+        self.type = item_type
+        self.value = value
+        self.description = description
+        self.stats = stats if stats else {}
+    
+    def __str__(self):
+        return f"{self.name} ({self.type.value}): {self.description}"
+
+class CharacterClass(Enum):
+    WARRIOR = "المحارب"
+    MAGE = "الساحر"
+    ARCHER = "الرامي"
+    ROGUE = "اللص"
+
+class Player:
+    def __init__(self, name, character_class):
+        self.name = name
+        self.character_class = character_class
+        self.level = 1
+        self.exp = 0
+        self.exp_to_next = 100
+        self.hp = self.max_hp = self.calculate_max_hp()
+        self.mp = self.max_mp = self.calculate_max_mp()
+        self.attack = self.calculate_attack()
+        self.defense = self.calculate_defense()
+        self.gold = 50
+        self.inventory = []
+        self.equipped = {"سلاح": None, "درع": None}
+        self.location = "القرية"
+        self.quests = []
+        self.completed_quests = []
+        self.kill_count = 0
+        self.play_time = 0
+        
+        # إضافة العناصر الأساسية
+        self.add_starting_items()
+    
+    def calculate_max_hp(self):
+        base_hp = {
+            CharacterClass.WARRIOR: 120,
+            CharacterClass.MAGE: 80,
+            CharacterClass.ARCHER: 90,
+            CharacterClass.ROGUE: 85
+        }
+        return base_hp[self.character_class] + (self.level * 10)
+    
+    def calculate_max_mp(self):
+        base_mp = {
+            CharacterClass.WARRIOR: 30,
+            CharacterClass.MAGE: 100,
+            CharacterClass.ARCHER: 50,
+            CharacterClass.ROGUE: 60
+        }
+        return base_mp[self.character_class] + (self.level * 5)
+    
+    def calculate_attack(self):
+        base_attack = {
+            CharacterClass.WARRIOR: 15,
+            CharacterClass.MAGE: 8,
+            CharacterClass.ARCHER: 12,
+            CharacterClass.ROGUE: 10
+        }
+        attack = base_attack[self.character_class] + (self.level * 2)
+        
+        if self.equipped["سلاح"]:
+            attack += self.equipped["سلاح"].stats.get("هجوم", 0)
+        
+        return attack
+    
+    def calculate_defense(self):
+        base_defense = {
+            CharacterClass.WARRIOR: 10,
+            CharacterClass.MAGE: 4,
+            CharacterClass.ARCHER: 6,
+            CharacterClass.ROGUE: 5
+        }
+        defense = base_defense[self.character_class] + (self.level * 1)
+        
+        if self.equipped["درع"]:
+            defense += self.equipped["درع"].stats.get("دفاع", 0)
+        
+        return defense
+    
+    def add_starting_items(self):
+        starting_items = {
+            CharacterClass.WARRIOR: [
+                Item("سيف مبتدئ", ItemType.WEAPON, 10, "سيف أساسي للمحاربين الجدد", {"هجوم": 5}),
+                Item("درع مبتدئ", ItemType.ARMOR, 10, "درع بسيط للحماية", {"دفاع": 3}),
+                Item("جرعة صحية صغيرة", ItemType.POTION, 5, "تعيد 30 نقطة حياة", {"شفاء": 30})
+            ],
+            CharacterClass.MAGE: [
+                Item("عصا سحرية", ItemType.WEAPON, 10, "عصا للمبتدئين في السحر", {"هجوم": 3, "سحر": 5}),
+                Item("جرعة سحرية صغيرة", ItemType.POTION, 5, "تعيد 20 نقطة سحر", {"استعادة سحر": 20}),
+                Item("جرعة صحية صغيرة", ItemType.POTION, 5, "تعيد 30 نقطة حياة", {"شفاء": 30})
+            ],
+            CharacterClass.ARCHER: [
+                Item("قوس مبتدئ", ItemType.WEAPON, 10, "قوس للرماة المبتدئين", {"هجوم": 4}),
+                Item("جرعة صحية صغيرة", ItemType.POTION, 5, "تعيد 30 نقطة حياة", {"شفاء": 30}),
+                Item("سهام (10)", ItemType.MATERIAL, 5, "سهام للقوس", {})
+            ],
+            CharacterClass.ROGUE: [
+                Item("خنجران", ItemType.WEAPON, 10, "خنجران للصوص المبتدئين", {"هجوم": 4, "تسلل": 5}),
+                Item("جرعة صحية صغيرة", ItemType.POTION, 5, "تعيد 30 نقطة حياة", {"شفاء": 30})
+            ]
+        }
+        
+        self.inventory.extend(starting_items[self.character_class])
+        self.equip_item(starting_items[self.character_class][0].name)
+        if self.character_class == CharacterClass.WARRIOR:
+            self.equip_item(starting_items[self.character_class][1].name)
+    
+    def equip_item(self, item_name):
+        for item in self.inventory:
+            if item.name == item_name and item.type in [ItemType.WEAPON, ItemType.ARMOR]:
+                if item.type == ItemType.WEAPON:
+                    self.equipped["سلاح"] = item
+                elif item.type == ItemType.ARMOR:
+                    self.equipped["درع"] = item
+                return f"لقد جهزت {item.name}"
+        return "لم أجد هذا العنصر في المخزن"
+    
+    def use_item(self, item_name):
+        for i, item in enumerate(self.inventory):
+            if item.name == item_name:
+                if item.type == ItemType.POTION:
+                    if "شفاء" in item.stats:
+                        heal_amount = min(item.stats["شفاء"], self.max_hp - self.hp)
+                        self.hp += heal_amount
+                        self.inventory.pop(i)
+                        return f"استخدمت {item.name} واستعديت {heal_amount} نقطة حياة"
+                    elif "استعادة سحر" in item.stats:
+                        mp_amount = min(item.stats["استعادة سحر"], self.max_mp - self.mp)
+                        self.mp += mp_amount
+                        self.inventory.pop(i)
+                        return f"استخدمت {item.name} واستعديت {mp_amount} نقطة سحر"
+                elif item.type == ItemType.KEY:
+                    self.inventory.pop(i)
+                    return f"استخدمت {item.name}"
+        return "لا يمكن استخدام هذا العنصر"
+    
+    def add_exp(self, amount):
+        self.exp += amount
+        while self.exp >= self.exp_to_next:
+            self.level_up()
+    
+    def level_up(self):
+        self.level += 1
+        self.exp -= self.exp_to_next
+        self.exp_to_next = int(self.exp_to_next * 1.5)
+        
+        old_max_hp = self.max_hp
+        old_max_mp = self.max_mp
+        
+        self.max_hp = self.calculate_max_hp()
+        self.max_mp = self.calculate_max_mp()
+        self.hp = self.max_hp
+        self.mp = self.max_mp
+        
+        return f"""
+        ╔══════════════════════╗
+        ║    لقد ارتقيت مستوى!   ║
+        ║    المستوى: {self.level:2d}            ║
+        ║                      ║
+        ║  ✓ الحياة: {old_max_hp:3d} → {self.max_hp:3d}  ║
+        ║  ✓ السحر:  {old_max_mp:3d} → {self.max_mp:3d}  ║
+        ╚══════════════════════╝
+        """
+    
+    def status(self):
+        hp_bar = "█" * int((self.hp / self.max_hp) * 20) + "░" * (20 - int((self.hp / self.max_hp) * 20))
+        mp_bar = "█" * int((self.mp / self.max_mp) * 20) + "░" * (20 - int((self.mp / self.max_mp) * 20))
+        exp_percent = (self.exp / self.exp_to_next) * 100
+        
+        return f"""
+╔══════════════════════════════════════════╗
+║            حالة {self.name:^20}          ║
+╠══════════════════════════════════════════╣
+║ المستوى: {self.level:3d}    {self.character_class.value:^15}    ║
+║ الخبرة:  {self.exp:4d}/{self.exp_to_next:4d} ({exp_percent:.1f}%)     ║
+║                                          ║
+║ الحياة: {hp_bar} {self.hp:3d}/{self.max_hp:3d} ║
+║ السحر:  {mp_bar} {self.mp:3d}/{self.max_mp:3d} ║
+║                                          ║
+║ الهجوم:  {self.attack:3d}       الدفاع: {self.defense:3d}    ║
+║ الذهب:   {self.gold:5d}       المقتولين: {self.kill_count:3d} ║
+║ الموقع:  {self.location:^20}      ║
+╚══════════════════════════════════════════╝
+        """
+
+class Enemy:
+    def __init__(self, name, level, area):
+        self.name = name
+        self.level = level
+        self.area = area
+        self.max_hp = 20 + (level * 15)
+        self.hp = self.max_hp
+        self.attack = 5 + (level * 3)
+        self.defense = 2 + (level * 2)
+        self.exp_reward = 20 + (level * 10)
+        self.gold_reward = random.randint(5 + level * 2, 15 + level * 5)
+        
+        # إضافة عناصر مسروقة
+        self.loot = self.generate_loot()
+    
+    def generate_loot(self):
+        loot_table = {
+            "الغابة": [
+                Item("جلد ذئب", ItemType.MATERIAL, 3, "جلد ذئب يمكن بيعه", {}),
+                Item("جرعة صحية صغيرة", ItemType.POTION, 5, "تعيد 30 نقطة حياة", {"شفاء": 30}),
+                Item("فطر سحري", ItemType.MATERIAL, 8, "مكون للجرعات السحرية", {})
+            ],
+            "الكهف": [
+                Item("حجر متوهج", ItemType.MATERIAL, 10, "حجر غريب يتوهج في الظلام", {}),
+                Item("عظم قوي", ItemType.MATERIAL, 5, "عظم متين لصناعة الأسلحة", {}),
+                Item("جرعة سحرية صغيرة", ItemType.POTION, 5, "تعيد 20 نقطة سحر", {"استعادة سحر": 20})
+            ],
+            "القلعة": [
+                Item("سيف قديم", ItemType.WEAPON, 25, "سيف قديم لكنه حاد", {"هجوم": 8}),
+                Item("درع صدئ", ItemType.ARMOR, 20, "درع قديم لكنه مفيد", {"دفاع": 5}),
+                Item("مفتاح القلعة", ItemType.KEY, 1, "يفتح أبواب القلعة الداخلية", {})
+            ],
+            "الصحراء": [
+                Item("سمع العقرب", ItemType.MATERIAL, 15, "سمع قوي لصناعة السموم", {}),
+                Item("صبار الشفاء", ItemType.POTION, 10, "صبار له خصائص علاجية", {"شفاء": 50}),
+                Item("حجر الشمس", ItemType.TREASURE, 50, "حجر ثمين يتلألأ كالشمس", {})
+            ]
+        }
+        
+        if random.random() < 0.4:  # 40% فرصة للحصول على مسروق
+            return random.choice(loot_table.get(self.area, []))
+        return None
+    
+    def status(self):
+        hp_bar = "█" * int((self.hp / self.max_hp) * 20) + "░" * (20 - int((self.hp / self.max_hp) * 20))
+        return f"""
+╔══════════════════════════════════════════╗
+║            {self.name:^20} (مستوى {self.level})  ║
+╠══════════════════════════════════════════╣
+║ الحياة: {hp_bar} {self.hp:3d}/{self.max_hp:3d} ║
+║ الهجوم: {self.attack:3d}       الدفاع: {self.defense:3d}    ║
+╚══════════════════════════════════════════╝
+        """
+
+# ============== نظام المهام ==============
+
+class Quest:
+    def __init__(self, id, title, description, objectives, rewards):
+        self.id = id
+        self.title = title
+        self.description = description
+        self.objectives = objectives  # {objective_type: target_count}
+        self.rewards = rewards  # {exp: amount, gold: amount, items: [items]}
+        self.progress = {obj: 0 for obj in objectives}
+        self.completed = False
+    
+    def update_progress(self, objective_type, amount=1):
+        if objective_type in self.progress:
+            self.progress[objective_type] += amount
+            self.check_completion()
+    
+    def check_completion(self):
+        for obj, target in self.objectives.items():
+            if self.progress[obj] < target:
+                return False
+        self.completed = True
+        return True
+    
+    def status(self):
+        status_text = f"\nالمهمة: {self.title}\n{self.description}\n"
+        for obj, target in self.objectives.items():
+            progress = self.progress[obj]
+            status_text += f"  - {obj}: {progress}/{target}\n"
+        
+        if self.completed:
+            status_text += "\n✓ المهمة مكتملة! اذهب للحصول على مكافأتك.\n"
+        
+        return status_text
+
+# ============== إدارة اللعبة ==============
+
+class Game:
+    def __init__(self):
+        self.player = None
+        self.game_running = False
+        self.game_time_start = None
+        self.areas = {
+            "القرية": {
+                "description": "قرية هادئة محاطة بالخضرة. يمكنك التحدث مع السكان أو التوجه للمغامرة.",
+                "connections": ["الغابة", "المتجر", "الصالة"],
+                "enemies": [],
+                "npcs": ["التاجر", "الكابتن", "المعلم"]
+            },
+            "الغابة": {
+                "description": "غابة كثيفة مليئة بالأصوات الغريبة. الذئاب والمخلوقات الخطيرة تتجول هنا.",
+                "connections": ["القرية", "الكهف"],
+                "enemies": ["ذئب", "خنزير بري", "عنكبوت عملاق"],
+                "npcs": ["صياد"]
+            },
+            "الكهف": {
+                "description": "كهف مظلم ورطب. أصوات زئير غريبة تأتي من الأعماق.",
+                "connections": ["الغابة", "القلعة"],
+                "enemies": ["غول", "خفاش عملاق", "دب الكهف"],
+                "npcs": []
+            },
+            "القلعة": {
+                "description": "قلعة قديمة مهجورة. يشاع أن كنوزاً ثمينة مخبأة في أعماقها.",
+                "connections": ["الكهف"],
+                "enemies": ["فارس الهيكل", "ساحر مظلم", "تنين صغير"],
+                "npcs": ["فارس شبح"]
+            },
+            "المتجر": {
+                "description": "متجر مليء بالبضائع المتنوعة. التاجر ينتظر الزبائن.",
+                "connections": ["القرية"],
+                "enemies": [],
+                "npcs": ["التاجر"]
+            },
+            "الصالة": {
+                "description": "صالة القرية حيث يجتمع المغامرون ويتلقون المهام.",
+                "connections": ["القرية"],
+                "enemies": [],
+                "npcs": ["كابتن الحرس", "مسؤول المهام"]
+            },
+            "الصحراء": {
+                "description": "صحراء واسعة وحارة. العقارب والكائنات الصحراوية تعيش هنا.",
+                "connections": ["القرية"],
+                "enemies": ["عقرب عملاق", "ثعبان الصحراء", "نمر رمل"],
+                "npcs": ["بدوي"]
+            }
+        }
+        
+        self.shop_items = [
+            Item("جرعة صحية صغيرة", ItemType.POTION, 10, "تعيد 30 نقطة حياة", {"شفاء": 30}),
+            Item("جرعة صحية متوسطة", ItemType.POTION, 25, "تعيد 60 نقطة حياة", {"شفاء": 60}),
+            Item("جرعة صحية كبيرة", ItemType.POTION, 50, "تعيد 100 نقطة حياة", {"شفاء": 100}),
+            Item("جرعة سحرية صغيرة", ItemType.POTION, 15, "تعيد 20 نقطة سحر", {"استعادة سحر": 20}),
+            Item("جرعة سحرية كبيرة", ItemType.POTION, 40, "تعيد 50 نقطة سحر", {"استعادة سحر": 50}),
+            Item("سيف فولاذي", ItemType.WEAPON, 100, "سيف قوي مصنوع من الفولاذ", {"هجوم": 12}),
+            Item("درع فولاذي", ItemType.ARMOR, 80, "درع متين من الفولاذ", {"دفاع": 8}),
+            Item("قوس طويل", ItemType.WEAPON, 120, "قوس طويل لدقة عالية", {"هجوم": 10}),
+            Item("رداء الساحر", ItemType.ARMOR, 90, "رداء يعزز القوى السحرية", {"دفاع": 4, "سحر": 10})
+        ]
+        
+        self.quests = [
+            Quest(
+                id=1,
+                title="تهديد الذئاب",
+                description="الذئاب تهاجم القرى المجاورة. اذهب للغابة واقتل 5 ذئاب.",
+                objectives={"قتل ذئاب": 5},
+                rewards={"exp": 150, "gold": 100, "items": ["سيف فولاذي"]}
+            ),
+            Quest(
+                id=2,
+                title="استكشاف الكهف",
+                description="الكهف يحتوي على كنوز ثمينة. استكشفه واقتل 3 غيلان.",
+                objectives={"قتل غول": 3},
+                rewards={"exp": 300, "gold": 200, "items": ["درع فولاذي"]}
+            ),
+            Quest(
+                id=3,
+                title="التنين الصغير",
+                description="تنين صغير يهدد المنطقة. اذهب للقلعة واقتله.",
+                objectives={"قتل تنين": 1},
+                rewards={"exp": 500, "gold": 500, "items": ["رداء الساحر", "جرعة صحية كبيرة"]}
+            ),
+            Quest(
+                id=4,
+                title="جمع المواد",
+                description="التاجر يحتاج لـ 5 جلود ذئاب و3 أحجار متوهجة.",
+                objectives={"جمع جلود": 5, "جمع أحجار": 3},
+                rewards={"exp": 250, "gold": 300, "items": ["جرعة سحرية كبيرة"]}
+            )
+        ]
+        
+        self.enemy_types = {
+            "ذئب": {"min_level": 1, "max_level": 3, "area": "الغابة"},
+            "خنزير بري": {"min_level": 2, "max_level": 4, "area": "الغابة"},
+            "عنكبوت عملاق": {"min_level": 3, "max_level": 5, "area": "الغابة"},
+            "غول": {"min_level": 5, "max_level": 7, "area": "الكهف"},
+            "خفاش عملاق": {"min_level": 4, "max_level": 6, "area": "الكهف"},
+            "دب الكهف": {"min_level": 6, "max_level": 8, "area": "الكهف"},
+            "فارس الهيكل": {"min_level": 8, "max_level": 10, "area": "القلعة"},
+            "ساحر مظلم": {"min_level": 9, "max_level": 12, "area": "القلعة"},
+            "تنين صغير": {"min_level": 15, "max_level": 15, "area": "القلعة"},
+            "عقرب عملاق": {"min_level": 7, "max_level": 9, "area": "الصحراء"},
+            "ثعبان الصحراء": {"min_level": 6, "max_level": 8, "area": "الصحراء"},
+            "نمر رمل": {"min_level": 8, "max_level": 10, "area": "الصحراء"}
+        }
+
+    # ============== الوظائف الرئيسية ==============
+
+    def start_game(self):
+        print("""
+╔══════════════════════════════════════════╗
+║        مغامرات المملكة المفقودة         ║
+║           Kingdom's Lost Adventures      ║
+╚══════════════════════════════════════════╝
+        """)
+        
+        player_name = input("ما اسمك يا بطل؟ ")
+        
+        print("\nاختر فئتك:")
+        print("1. محارب - قوي في الهجوم والدفاع")
+        print("2. ساحر - قوي بالسحر وضعيف بالدفاع")
+        print("3. رامي - دقيق وسريع")
+        print("4. لص - خفي وماهر بالسرقة")
+        
+        class_choice = input("\nاختر رقم الفئة (1-4): ")
+        class_map = {
+            "1": CharacterClass.WARRIOR,
+            "2": CharacterClass.MAGE,
+            "3": CharacterClass.ARCHER,
+            "4": CharacterClass.ROGUE
+        }
+        
+        character_class = class_map.get(class_choice, CharacterClass.WARRIOR)
+        
+        self.player = Player(player_name, character_class)
+        self.game_running = True
+        self.game_time_start = datetime.now()
+        
+        print(f"\nمرحباً {player_name} الفئة {character_class.value}!")
+        print("لقد بدأت رحلتك في قرية السلام.")
+        print("اكتب 'مساعدة' لرؤية الأوامر المتاحة.")
+        
+        self.main_loop()
+
+    def main_loop(self):
+        while self.game_running:
+            self.update_play_time()
+            
+            print(f"\nأنت الآن في: {self.player.location}")
+            print(self.areas[self.player.location]["description"])
+            
+            command = input("\n> ").strip().lower()
+            
+            if command == "مساعدة":
+                self.show_help()
+            elif command == "حالة":
+                print(self.player.status())
+            elif command == "انتقال":
+                self.travel()
+            elif command == "استكشاف":
+                self.explore()
+            elif command == "المخزن":
+                self.show_inventory()
+            elif command == "تجهيز":
+                self.equip_item_menu()
+            elif command == "استخدام":
+                self.use_item_menu()
+            elif command == "المهام":
+                self.show_quests()
+            elif command == "محاربة":
+                self.initiate_combat()
+            elif command == "متجر":
+                if self.player.location in ["القرية", "المتجر"]:
+                    self.shop()
+                else:
+                    print("لا يوجد متجر هنا!")
+            elif command == "مهمة":
+                if self.player.location == "الصالة":
+                    self.get_quest()
+                else:
+                    print("اذهب إلى الصالة للحصول على المهام.")
+            elif command == "حفظ":
+                self.save_game()
+            elif command == "تحميل":
+                self.load_game()
+            elif command == "خروج":
+                self.quit_game()
+            elif command == "إحصائيات":
+                self.show_statistics()
+            elif command == "تصنيع":
+                self.crafting_menu()
+            elif command == "تحدث":
+                self.talk_to_npc()
+            else:
+                print("أمر غير معروف. اكتب 'مساعدة' لرؤية الأوامر.")
+
+    # ============== أنظمة اللعبة ==============
+
+    def show_help(self):
+        help_text = """
+╔══════════════════════════════════════════╗
+║                الأوامر                   ║
+╠══════════════════════════════════════════╣
+║ حالة       - عرض حالة الشخصية           ║
+║ انتقال     - الانتقال لمنطقة أخرى       ║
+║ استكشاف    - استكشاف المنطقة الحالية    ║
+║ محاربة     - بدء معركة                  ║
+║ مخزن       - عرض المخزن                 ║
+║ تجهيز     - تجهيز سلاح أو درع           ║
+║ استخدام    - استخدام عنصر               ║
+║ مهام       - عرض المهام                 ║
+║ مهمة       - الحصول على مهمة جديدة      ║
+║ متجر       - زيارة المتجر               ║
+║ تحدث       - التحدث مع السكان           ║
+║ تصنيع      - تصنيع عناصر جديدة          ║
+║ حفظ        - حفظ اللعبة                 ║
+║ تحميل      - تحميل لعبة محفوظة          ║
+║ إحصائيات   - عرض إحصائيات اللعبة        ║
+║ خروج       - الخروج من اللعبة           ║
+║ مساعدة     - عرض هذه القائمة            ║
+╚══════════════════════════════════════════╝
+        """
+        print(help_text)
+
+    def travel(self):
+        current_area = self.areas[self.player.location]
+        
+        if not current_area["connections"]:
+            print("لا يمكنك الانتقال من هذه المنطقة!")
+            return
+        
+        print("\nيمكنك الانتقال إلى:")
+        for i, area in enumerate(current_area["connections"], 1):
+            print(f"{i}. {area}")
+        
+        try:
+            choice = int(input("\اختر رقم المنطقة: ")) - 1
+            if 0 <= choice < len(current_area["connections"]):
+                new_location = current_area["connections"][choice]
+                self.player.location = new_location
+                print(f"لقد انتقلت إلى {new_location}")
+            else:
+                print("اختيار غير صحيح!")
+        except ValueError:
+            print("الرجاء إدخال رقم صحيح!")
+
+    def explore(self):
+        current_area = self.areas[self.player.location]
+        
+        if current_area["enemies"]:
+            print("تقوم باستكشاف المنطقة...")
+            time.sleep(1)
+            
+            if random.random() < 0.6:  # 60% فرصة لمقابلة عدو
+                enemy_type = random.choice(current_area["enemies"])
+                enemy_info = self.enemy_types[enemy_type]
+                enemy_level = random.randint(enemy_info["min_level"], enemy_info["max_level"])
+                enemy = Enemy(enemy_type, enemy_level, self.player.location)
+                
+                print(f"\n⚠ لقد صادفت {enemy.name} (مستوى {enemy.level})!")
+                print(enemy.status())
+                
+                choice = input("هل تريد المحاربة؟ (نعم/لا): ").lower()
+                if choice in ["نعم", "ن", "y", "yes"]:
+                    self.combat(enemy)
+                else:
+                    if random.random() < 0.3:  # 30% فرصة للهروب الفاشل
+                        print("فشلت في الهروب! يهاجمك العدو!")
+                        self.combat(enemy)
+                    else:
+                        print("لقد هربت بنجاح!")
+            else:
+                # اكتشاف عنصر أو ذهب
+                discoveries = [
+                    ("عثرت على صندوق كنز!", random.randint(10, 50), None),
+                    ("وجدت جرعة صحية على الأرض!", 0, Item("جرعة صحية صغيرة", ItemType.POTION, 5, "تعيد 30 نقطة حياة", {"شفاء": 30})),
+                    ("لاحظت كيس ذهب ملقى!", random.randint(5, 20), None),
+                    ("وجدت سيفاً قديماً!", 0, Item("سيف صدئ", ItemType.WEAPON, 15, "سيف قديم لكنه مفيد", {"هجوم": 4}))
+                ]
+                
+                discovery = random.choice(discoveries)
+                print(f"\n✨ {discovery[0]}")
+                
+                if discovery[1] > 0:
+                    self.player.gold += discovery[1]
+                    print(f"لقد حصلت على {discovery[1]} ذهب!")
+                
+                if discovery[2]:
+                    self.player.inventory.append(discovery[2])
+                    print(f"لقد حصلت على {discovery[2].name}!")
+        else:
+            print("هذه منطقة آمنة. لا يوجد ما تستكشفه هنا.")
+
+    def show_inventory(self):
+        if not self.player.inventory:
+            print("المخزن فارغ!")
+            return
+        
+        print("\n╔══════════════════════════════════════════╗")
+        print("║               المخزن                      ║")
+        print("╠══════════════════════════════════════════╣")
+        
+        items_by_type = {}
+        for item in self.player.inventory:
+            items_by_type.setdefault(item.type.value, []).append(item)
+        
+        for item_type, items in items_by_type.items():
+            print(f"║  {item_type:^36}  ║")
+            print("╠──────────────────────────────────────────╣")
+            for item in items:
+                print(f"║ • {item.name:20} - {item.description:15} ║")
+            print("╠──────────────────────────────────────────╣")
+        
+        print("║ المعدات المجهزة:                           ║")
+        print("╠──────────────────────────────────────────╣")
+        for slot, item in self.player.equipped.items():
+            item_name = item.name if item else "لا شيء"
+            print(f"║ {slot:10}: {item_name:26} ║")
+        
+        print("╚══════════════════════════════════════════╝")
+        print(f"\nالذهب: {self.player.gold}")
+
+    def equip_item_menu(self):
+        equipable_items = [item for item in self.player.inventory 
+                          if item.type in [ItemType.WEAPON, ItemType.ARMOR]]
+        
+        if not equipable_items:
+            print("لا تملك عناصر يمكن تجهيزها!")
+            return
+        
+        print("\nالعناصر التي يمكن تجهيزها:")
+        for i, item in enumerate(equipable_items, 1):
+            print(f"{i}. {item.name} ({item.type.value}) - {item.description}")
+        
+        try:
+            choice = int(input("\nاختر رقم العنصر: ")) - 1
+            if 0 <= choice < len(equipable_items):
+                result = self.player.equip_item(equipable_items[choice].name)
+                print(result)
+                # تحديث الإحصائيات
+                self.player.attack = self.player.calculate_attack()
+                self.player.defense = self.player.calculate_defense()
+            else:
+                print("اختيار غير صحيح!")
+        except ValueError:
+            print("الرجاء إدخال رقم صحيح!")
+
+    def use_item_menu(self):
+        usable_items = [item for item in self.player.inventory 
+                       if item.type == ItemType.POTION]
+        
+        if not usable_items:
+            print("لا تملك عناصر يمكن استخدامها!")
+            return
+        
+        print("\nالعناصر التي يمكن استخدامها:")
+        for i, item in enumerate(usable_items, 1):
+            effect = list(item.stats.keys())[0]
+            value = list(item.stats.values())[0]
+            print(f"{i}. {item.name} - {effect} {value}")
+        
+        try:
+            choice = int(input("\nاختر رقم العنصر: ")) - 1
+            if 0 <= choice < len(usable_items):
+                result = self.player.use_item(usable_items[choice].name)
+                print(result)
+            else:
+                print("اختيار غير صحيح!")
+        except ValueError:
+            print("الرجاء إدخال رقم صحيح!")
+
+    def show_quests(self):
+        if not self.player.quests and not self.player.completed_quests:
+            print("ليس لديك أي مهام حالياً!")
+            return
+        
+        print("\n╔══════════════════════════════════════════╗")
+        print("║               المهام                      ║")
+        print("╠══════════════════════════════════════════╣")
+        
+        if self.player.quests:
+            print("║          المهام الجارية                   ║")
+            print("╠══════════════════════════════════════════╣")
+            for quest in self.player.quests:
+                print(f"║ {quest.status():38} ║")
+        
+        if self.player.completed_quests:
+            print("║          المهام المكتملة                  ║")
+            print("╠══════════════════════════════════════════╣")
+            for quest in self.player.completed_quests:
+                print(f"║ ✓ {quest.title:35} ║")
+        
+        print("╚══════════════════════════════════════════╝")
+
+    def get_quest(self):
+        available_quests = [q for q in self.quests 
+                          if q.id not in [quest.id for quest in self.player.quests + self.player.completed_quests]]
+        
+        if not available_quests:
+            print("لا توجد مهام جديدة حالياً!")
+            return
+        
+        print("\nالمهام المتاحة:")
+        for i, quest in enumerate(available_quests, 1):
+            print(f"{i}. {quest.title}")
+            print(f"   {quest.description}")
+            print(f"   المكافأة: {quest.rewards['exp']} خبرة، {quest.rewards['gold']} ذهب")
+            print()
+        
+        try:
+            choice = int(input("\nاختر رقم المهمة: ")) - 1
+            if 0 <= choice < len(available_quests):
+                self.player.quests.append(available_quests[choice])
+                print(f"قبلت المهمة: {available_quests[choice].title}")
+            else:
+                print("اختيار غير صحيح!")
+        except ValueError:
+            print("الرجاء إدخال رقم صحيح!")
+
+    def initiate_combat(self):
+        current_area = self.areas[self.player.location]
+        
+        if not current_area["enemies"]:
+            print("لا يوجد أعداء في هذه المنطقة!")
+            return
+        
+        print("\nاختر نوع العدو لمحاربته:")
+        enemies_in_area = [e for e in current_area["enemies"]]
+        
+        for i, enemy_type in enumerate(enemies_in_area, 1):
+            enemy_info = self.enemy_types[enemy_type]
+            print(f"{i}. {enemy_type} (المستوى {enemy_info['min_level']}-{enemy_info['max_level']})")
+        
+        try:
+            choice = int(input("\nاختر رقم العدو: ")) - 1
+            if 0 <= choice < len(enemies_in_area):
+                enemy_type = enemies_in_area[choice]
+                enemy_info = self.enemy_types[enemy_type]
+                enemy_level = random.randint(enemy_info["min_level"], enemy_info["max_level"])
+                enemy = Enemy(enemy_type, enemy_level, self.player.location)
+                
+                print(f"\nبدء المعركة مع {enemy.name}!")
+                self.combat(enemy)
+            else:
+                print("اختيار غير صحيح!")
+        except ValueError:
+            print("الرجاء إدخال رقم صحيح!")
+
+    def combat(self, enemy):
+        print("\n" + "="*50)
+        print(f"معركة ضد {enemy.name}!")
+        print("="*50)
+        
+        while enemy.hp > 0 and self.player.hp > 0:
+            print("\n" + enemy.status())
+            print(self.player.status())
+            
+            print("\nاختر إجراء:")
+            print("1. هجوم عادي")
+            print("2. هجوم خاص (يتطلب سحراً)")
+            print("3. استخدام جرعة")
+            print("4. محاولة الهرب")
+            
+            try:
+                action = input("\nاختر رقم الإجراء: ")
+                
+                if action == "1":
+                    self.normal_attack(enemy)
+                elif action == "2":
+                    self.special_attack(enemy)
+                elif action == "3":
+                    self.use_potion_in_combat()
+                elif action == "4":
+                    if random.random() < 0.5:
+                        print("لقد هربت بنجاح!")
+                        return
+                    else:
+                        print("فشلت في الهروب!")
+                else:
+                    print("اختيار غير صحيح!")
+                    continue
+                
+                # هجوم العدو إذا كان لا يزال حياً
+                if enemy.hp > 0:
+                    self.enemy_attack(enemy)
+            
+            except ValueError:
+                print("الرجاء إدخال رقم صحيح!")
+        
+        if self.player.hp <= 0:
+            print("\n╔══════════════════════════════════════════╗")
+            print("║            لقد هزمت!                     ║")
+            print("║       ستعود إلى القرية                   ║")
+            print("╚══════════════════════════════════════════╝")
+            self.player.hp = self.player.max_hp // 2
+            self.player.location = "القرية"
+            self.player.gold = max(0, self.player.gold - 20)  # خسارة بعض الذهب
+        else:
+            self.victory(enemy)
+
+    def normal_attack(self, enemy):
+        damage = max(1, self.player.attack - enemy.defense // 2)
+        enemy.hp -= damage
+        print(f"هاجمت {enemy.name} وتسببت في {damage} ضرر!")
+        
+        # تحديث المهام
+        self.update_quest_progress(f"قتل {enemy.name.split()[0]}")
+
+    def special_attack(self, enemy):
+        special_cost = 15
+        
+        if self.player.mp < special_cost:
+            print("ليس لديك سحر كافٍ!")
+            return
+        
+        self.player.mp -= special_cost
+        
+        damage_multiplier = {
+            CharacterClass.WARRIOR: 2.0,
+            CharacterClass.MAGE: 2.5,
+            CharacterClass.ARCHER: 1.8,
+            CharacterClass.ROGUE: 2.2
+        }
+        
+        damage = max(1, int(self.player.attack * damage_multiplier[self.player.character_class] - enemy.defense // 2))
+        enemy.hp -= damage
+        
+        attack_names = {
+            CharacterClass.WARRIOR: "ضربة ساحقة",
+            CharacterClass.MAGE: "كرة نار",
+            CharacterClass.ARCHER: "سهم نافذ",
+            CharacterClass.ROGUE: "طعنة خفية"
+        }
+        
+        print(f"استخدمت {attack_names[self.player.character_class]} على {enemy.name} وتسببت في {damage} ضرر!")
+
+    def use_potion_in_combat(self):
+        usable_items = [item for item in self.player.inventory 
+                       if item.type == ItemType.POTION]
+        
+        if not usable_items:
+            print("لا تملك جرعات!")
+            return
+        
+        print("\nاختر جرعة للاستخدام:")
+        for i, item in enumerate(usable_items, 1):
+            effect = list(item.stats.keys())[0]
+            value = list(item.stats.values())[0]
+            print(f"{i}. {item.name} - {effect} {value}")
+        
+        try:
+            choice = int(input("\nاختر رقم الجرعة: ")) - 1
+            if 0 <= choice < len(usable_items):
+                result = self.player.use_item(usable_items[choice].name)
+                print(result)
+            else:
+                print("اختيار غير صحيح!")
+        except ValueError:
+            print("الرجاء إدخال رقم صحيح!")
+
+    def enemy_attack(self, enemy):
+        damage = max(1, enemy.attack - self.player.defense // 2)
+        self.player.hp -= damage
+        print(f"{enemy.name} هاجمك وتسبب في {damage} ضرر!")
+
+    def victory(self, enemy):
+        print(f"\n🎉 لقد هزمت {enemy.name}!")
+        
+        # المكافآت
+        self.player.add_exp(enemy.exp_reward)
+        self.player.gold += enemy.gold_reward
+        self.player.kill_count += 1
+        
+        print(f"كسبت {enemy.exp_reward} خبرة و {enemy.gold_reward} ذهب!")
+        
+        # المسروقات
+        if enemy.loot:
+            self.player.inventory.append(enemy.loot)
+            print(f"حصلت على {enemy.loot.name}!")
+        
+        # التحقق من المهام
+        self.check_quest_completion()
+
+    def update_quest_progress(self, objective_type):
+        for quest in self.player.quests:
+            for obj in quest.objectives:
+                if obj in objective_type:
+                    quest.update_progress(obj)
+                    break
+
+    def check_quest_completion(self):
+        for quest in self.player.quests[:]:
+            if quest.completed and quest not in self.player.completed_quests:
+                print(f"\n✨ أكملت المهمة: {quest.title}!")
+                
+                # منح المكافآت
+                self.player.add_exp(quest.rewards["exp"])
+                self.player.gold += quest.rewards["gold"]
+                
+                print(f"كسبت {quest.rewards['exp']} خبرة و {quest.rewards['gold']} ذهب!")
+                
+                # منح العناصر
+                for item_name in quest.rewards.get("items", []):
+                    # البحث عن العنصر في المتجر أو إنشاؤه
+                    for shop_item in self.shop_items:
+                        if shop_item.name == item_name:
+                            self.player.inventory.append(shop_item)
+                            print(f"حصلت على {item_name}!")
+                            break
+                
+                self.player.completed_quests.append(quest)
+                self.player.quests.remove(quest)
+
+    def shop(self):
+        print("\n╔══════════════════════════════════════════╗")
+        print("║                المتجر                     ║")
+        print("║        مرحباً! ماذا تريد؟                ║")
+        print("╚══════════════════════════════════════════╝")
+        
+        print(f"\nذهبك: {self.player.gold}")
+        print("\nالبضائع المتاحة:")
+        
+        for i, item in enumerate(self.shop_items, 1):
+            print(f"{i}. {item.name:25} - {item.value:3d} ذهب")
+            print(f"   {item.description}")
+        
+        print("\nالأوامر:")
+        print("شراء <رقم> - شراء عنصر")
+        print("بيع - عرض العناصر للبيع")
+        print("خروج - مغادرة المتجر")
+        
+        while True:
+            command = input("\n> ").strip().lower()
+            
+            if command.startswith("شراء"):
+                try:
+                    item_num = int(command.split()[1]) - 1
+                    if 0 <= item_num < len(self.shop_items):
+                        item = self.shop_items[item_num]
+                        
+                        if self.player.gold >= item.value:
+                            self.player.gold -= item.value
+                            self.player.inventory.append(item)
+                            print(f"اشتريت {item.name}!")
+                        else:
+                            print("ليس لديك ذهب كافٍ!")
+                    else:
+                        print("رقم العنصر غير صحيح!")
+                except (ValueError, IndexError):
+                    print("استخدم: شراء <رقم>")
+            
+            elif command == "بيع":
+                self.sell_items()
+            
+            elif command == "خروج":
+                print("شكراً لزيارتك!")
+                break
+            
+            else:
+                print("أمر غير معروف!")
+
+    def sell_items(self):
+        if not self.player.inventory:
+            print("ليس لديك عناصر للبيع!")
+            return
+        
+        print("\nعناصر يمكن بيعها:")
+        for i, item in enumerate(self.player.inventory, 1):
+            sell_price = max(1, item.value // 2)
+            print(f"{i}. {item.name:25} - {sell_price:3d} ذهب")
+        
+        try:
+            choice = input("\nاختر رقم العنصر للبيع (أو 'الكل' لبيع الكل): ")
+            
+            if choice == "الكل":
+                total_gold = 0
+                for item in self.player.inventory[:]:
+                    sell_price = max(1, item.value // 2)
+                    total_gold += sell_price
+                
+                self.player.gold += total_gold
+                self.player.inventory.clear()
+                print(f"بعت جميع العناصر بـ {total_gold} ذهب!")
+            
+            else:
+                item_num = int(choice) - 1
+                if 0 <= item_num < len(self.player.inventory):
+                    item = self.player.inventory[item_num]
+                    sell_price = max(1, item.value // 2)
+                    
+                    self.player.gold += sell_price
+                    self.player.inventory.pop(item_num)
+                    
+                    print(f"بعت {item.name} بـ {sell_price} ذهب!")
+                else:
+                    print("رقم العنصر غير صحيح!")
+        
+        except ValueError:
+            print("الرجاء إدخال رقم صحيح!")
+
+    def crafting_menu(self):
+        print("\n╔══════════════════════════════════════════╗")
+        print("║               التصنيع                     ║")
+        print("║  يمكنك صنع عناصر من المواد الخام         ║")
+        print("╚══════════════════════════════════════════╝")
+        
+        recipes = [
+            {
+                "name": "جرعة صحية متوسطة",
+                "materials": [("جرعة صحية صغيرة", 2), ("فطر سحري", 1)],
+                "result": Item("جرعة صحية متوسطة", ItemType.POTION, 25, "تعيد 60 نقطة حياة", {"شفاء": 60})
+            },
+            {
+                "name": "سيف حاد",
+                "materials": [("سيف قديم", 1), ("حجر متوهج", 2), ("عظم قوي", 3)],
+                "result": Item("سيف حاد", ItemType.WEAPON, 60, "سيف حاد جداً", {"هجوم": 10})
+            },
+            {
+                "name": "جرعة قوة",
+                "materials": [("جرعة سحرية صغيرة", 1), ("سمع العقرب", 2), ("صبار الشفاء", 1)],
+                "result": Item("جرعة قوة", ItemType.POTION, 75, "تزيد الهجوم لمدة معركة", {"هجوم مؤقت": 20})
+            }
+        ]
+        
+        print("\nالوصفات المتاحة:")
+        for i, recipe in enumerate(recipes, 1):
+            print(f"\n{i}. {recipe['name']}")
+            print("   المواد المطلوبة:")
+            for material, amount in recipe["materials"]:
+                print(f"   - {material} ×{amount}")
+            print(f"   الناتج: {recipe['result'].name}")
+        
+        try:
+            choice = int(input("\nاختر رقم الوصفة للتصنيع: ")) - 1
+            if 0 <= choice < len(recipes):
+                self.craft_item(recipes[choice])
+            else:
+                print("اختيار غير صحيح!")
+        except ValueError:
+            print("الرجاء إدخال رقم صحيح!")
+
+    def craft_item(self, recipe):
+        # التحقق من المواد
+        for material, amount_needed in recipe["materials"]:
+            amount_has = sum(1 for item in self.player.inventory if item.name == material)
+            
+            if amount_has < amount_needed:
+                print(f"تحتاج إلى {amount_needed} من {material}، لديك فقط {amount_has}!")
+                return
+        
+        # إزالة المواد
+        for material, amount_needed in recipe["materials"]:
+            removed = 0
+            for i in range(len(self.player.inventory) - 1, -1, -1):
+                if removed >= amount_needed:
+                    break
+                if self.player.inventory[i].name == material:
+                    self.player.inventory.pop(i)
+                    removed += 1
+        
+        # إضافة الناتج
+        self.player.inventory.append(recipe["result"])
+        print(f"صنعت {recipe['result'].name} بنجاح!")
+
+    def talk_to_npc(self):
+        current_area = self.areas[self.player.location]
+        
+        if not current_area["npcs"]:
+            print("لا يوجد أحد للتحدث معه هنا!")
+            return
+        
+        print("\nيمكنك التحدث مع:")
+        for i, npc in enumerate(current_area["npcs"], 1):
+            print(f"{i}. {npc}")
+        
+        try:
+            choice = int(input("\nاختر رقم الشخص: ")) - 1
+            if 0 <= choice < len(current_area["npcs"]):
+                npc = current_area["npcs"][choice]
+                self.npc_dialogue(npc)
+            else:
+                print("اختيار غير صحيح!")
+        except ValueError:
+            print("الرجاء إدخال رقم صحيح!")
+
+    def npc_dialogue(self, npc):
+        dialogues = {
+            "التاجر": [
+                "مرحباً! أتمنى أن تجد ما تحتاجه في متجري.",
+                "سمعت أن هناك كنوزاً في القلعة القديمة...",
+                "احذر من الذئاب في الغابة، إنها شرسة هذه الأيام."
+            ],
+            "الكابتن": [
+                "المملكة بحاجة لأبطال مثلك!",
+                "التنين في القلعة يهدد قريتنا، هل يمكنك مساعدتنا؟",
+                "تدرب جيداً قبل الذهاب للمغامرات الخطيرة."
+            ],
+            "المعلم": [
+                f"أهلاً {self.player.name}! فئتك {self.player.character_class.value} ممتازة.",
+                "تذكر أن تتحقق من مخزنك دائماً قبل الخروج للمغامرة.",
+                "يمكنك صنع عناصر قوية إذا جمعت المواد المناسبة."
+            ],
+            "صياد": [
+                "الغابة أصبحت خطيرة مؤخراً.",
+                "إذا رأيت ذئباً أبيض كبيراً، اهرب فوراً!",
+                "أبحث عن فطر سحري نادر، هل رأيته؟"
+            ],
+            "فارس شبح": [
+                "كن حذراً في هذه القلعة... أرواح كثيرة ضاعت هنا.",
+                "التنين ليس أقوى مخلوق هنا... هناك شيء أسوأ في الأسفل.",
+                "إذا وجدت مفتاح القلعة الذهبي، فأنت قريب من الكنز."
+            ],
+            "كابتن الحرس": [
+                "المهام في الصالة تحتاج لأبطال شجعان.",
+                "أكمل المهام لترتقي مستواك وتكسب المكافآت.",
+                "بعض المهام خطيرة، لا تقبلها إلا إذا كنت مستعداً."
+            ],
+            "مسؤول المهام": [
+                "لدينا مهام متنوعة تناسب جميع المستويات.",
+                "المهام الصعبة تعطي مكافآت أفضل.",
+                "تذكر أن تسأل عن المهام الجديدة بين الحين والآخر."
+            ],
+            "بدوي": [
+                "الصحراء تخبئ أسراراً عظيمة... وكنوزاً كبيرة.",
+                "العقارب هنا سامة جداً، احذر!",
+                "في قلب الصحراء هناك واحة غريبة..."
+            ]
+        }
+        
+        if npc in dialogues:
+            print(f"\n{npc}: {random.choice(dialogues[npc])}")
+        else:
+            print(f"\n{npc}: مرحباً! كيف حالك؟")
+
+    def show_statistics(self):
+        current_time = datetime.now()
+        play_time = current_time - self.game_time_start
+        hours, remainder = divmod(play_time.seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        
+        stats = f"""
+╔══════════════════════════════════════════╗
+║            إحصائيات اللعبة              ║
+╠══════════════════════════════════════════╣
+║ الوقت المنقضي: {hours:02d}:{minutes:02d}:{seconds:02d}             ║
+║ المستوى: {self.player.level:3d}                          ║
+║ عدد المقتولين: {self.player.kill_count:4d}                 ║
+║ المهام المكتملة: {len(self.player.completed_quests):3d}           ║
+║ الذهب المجموع: {self.player.gold:6d}                ║
+║                                            ║
+║ العناصر المجمعة: {len(self.player.inventory):3d}             ║
+║ المعدات:                                  ║
+║   • السلاح: {self.player.equipped['سلاح'].name if self.player.equipped['سلاح'] else 'لا شيء':20} ║
+║   • الدرع: {self.player.equipped['درع'].name if self.player.equipped['درع'] else 'لا شيء':21} ║
+╚══════════════════════════════════════════╝
+        """
+        print(stats)
+
+    def save_game(self):
+        save_data = {
+            "player": {
+                "name": self.player.name,
+                "character_class": self.player.character_class.value,
+                "level": self.player.level,
+                "exp": self.player.exp,
+                "exp_to_next": self.player.exp_to_next,
+                "hp": self.player.hp,
+                "max_hp": self.player.max_hp,
+                "mp": self.player.mp,
+                "max_mp": self.player.max_mp,
+                "gold": self.player.gold,
+                "location": self.player.location,
+                "kill_count": self.player.kill_count,
+                "inventory": [
+                    {
+                        "name": item.name,
+                        "type": item.type.value,
+                        "value": item.value,
+                        "description": item.description,
+                        "stats": item.stats
+                    }
+                    for item in self.player.inventory
+                ],
+                "equipped": {
+                    slot: (item.name if item else None)
+                    for slot, item in self.player.equipped.items()
+                }
+            },
+            "game_time_start": self.game_time_start.isoformat(),
+            "quests": [
+                {
+                    "id": quest.id,
+                    "progress": quest.progress,
+                    "completed": quest.completed
+                }
+                for quest in self.player.quests + self.player.completed_quests
+            ]
+        }
+        
+        filename = f"save_{self.player.name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        
+        try:
+            with open(filename, 'w', encoding='utf-8') as f:
+                json.dump(save_data, f, ensure_ascii=False, indent=2)
+            print(f"تم حفظ اللعبة في {filename}")
+        except Exception as e:
+            print(f"خطأ في الحفظ: {e}")
+
+    def load_game(self):
+        # البحث عن ملفات الحفظ
+        save_files = [f for f in os.listdir() if f.startswith('save_') and f.endswith('.json')]
+        
+        if not save_files:
+            print("لا توجد ألعاب محفوظة!")
+            return
+        
+        print("\nالألعاب المحفوظة:")
+        for i, filename in enumerate(save_files, 1):
+            print(f"{i}. {filename}")
+        
+        try:
+            choice = int(input("\nاختر رقم الحفظ: ")) - 1
+            if 0 <= choice < len(save_files):
+                self.load_from_file(save_files[choice])
+            else:
+                print("اختيار غير صحيح!")
+        except (ValueError, IndexError):
+            print("الرجاء إدخال رقم صحيح!")
+
+    def load_from_file(self, filename):
+        try:
+            with open(filename, 'r', encoding='utf-8') as f:
+                save_data = json.load(f)
+            
+            # تحميل بيانات اللاعب
+            player_data = save_data["player"]
+            
+            # إنشاء اللاعب
+            class_map = {
+                "المحارب": CharacterClass.WARRIOR,
+                "الساحر": CharacterClass.MAGE,
+                "الرامي": CharacterClass.ARCHER,
+                "اللص": CharacterClass.ROGUE
+            }
+            
+            self.player = Player(
+                player_data["name"],
+                class_map[player_data["character_class"]]
+            )
+            
+            # تحديث خصائص اللاعب
+            self.player.level = player_data["level"]
+            self.player.exp = player_data["exp"]
+            self.player.exp_to_next = player_data["exp_to_next"]
+            self.player.hp = player_data["hp"]
+            self.player.max_hp = player_data["max_hp"]
+            self.player.mp = player_data["mp"]
+            self.player.max_mp = player_data["max_mp"]
+            self.player.gold = player_data["gold"]
+            self.player.location = player_data["location"]
+            self.player.kill_count = player_data["kill_count"]
+            
+            # تحميل المخزن
+            self.player.inventory = []
+            for item_data in player_data["inventory"]:
+                item_type = ItemType(item_data["type"])
+                item = Item(
+                    item_data["name"],
+                    item_type,
+                    item_data["value"],
+                    item_data["description"],
+                    item_data["stats"]
+                )
+                self.player.inventory.append(item)
+            
+            # تحميل المعدات
+            for slot, item_name in player_data["equipped"].items():
+                if item_name:
+                    for item in self.player.inventory:
+                        if item.name == item_name and item.type.value in ["سلاح", "درع"]:
+                            self.player.equipped[slot] = item
+                            break
+            
+            # تحديث الإحصائيات
+            self.player.attack = self.player.calculate_attack()
+            self.player.defense = self.player.calculate_defense()
+            
+            # تحميل الوقت
+            self.game_time_start = datetime.fromisoformat(save_data["game_time_start"])
+            
+            print(f"تم تحميل اللعبة بنجاح! مرحباً بعودتك {self.player.name}!")
+            
+        except Exception as e:
+            print(f"خطأ في تحميل اللعبة: {e}")
+
+    def update_play_time(self):
+        if self.game_time_start:
+            current_time = datetime.now()
+            self.player.play_time = (current_time - self.game_time_start).seconds
+
+    def quit_game(self):
+        print("\nهل تريد حفظ اللعبة قبل الخروج؟ (نعم/لا)")
+        choice = input("> ").lower()
+        
+        if choice in ["نعم", "ن", "y", "yes"]:
+            self.save_game()
+        
+        print("\nشكراً للعب! إلى اللقاء!")
+        self.game_running = False
+
+# ============== بدء اللعبة ==============
+
+if __name__ == "__main__":
+    game = Game()
+    game.start_game()
